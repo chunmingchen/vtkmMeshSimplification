@@ -31,6 +31,7 @@ include_directories(${Boost_INCLUDE_DIRS})
 #SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 ########################################################
 
+include_directories(.)
 
 #########################################################
 # Data path
@@ -41,6 +42,9 @@ add_definitions(-DDATA_FILE=\"${DATA_FILE}\")
 #########################################################
 set(headers  
   simplify.h
+  math/Matrix.h
+  math/VectorAnalysis.h
+  math/Basic.h
 )
 
 set(srcs

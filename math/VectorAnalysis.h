@@ -13,12 +13,13 @@
 //  the U.S. Government retains certain rights in this software.
 //
 //=============================================================================
-#ifndef _vtkm_math_VectorAnalysis_h
-#define _vtkm_math_VectorAnalysis_h
+#ifndef __vtkm_math_VectorAnalysis_h
+#define __vtkm_math_VectorAnalysis_h
 
 // This header file defines math functions that deal with linear albegra funcitons
 
 #include <vtkm/Types.h>
+#include "math/Basic.h"
 
 namespace vtkm {
 namespace math {
@@ -39,25 +40,9 @@ VTKM_EXEC_CONT_EXPORT T Lerp(const T &x, const T &y, const vtkm::FloatDefault w)
 
 
 // ----------------------------------------------------------------------------
-template <typename T>
-VTKM_EXEC_CONT_EXPORT T Sqrt(const T &x) {
- return sqrt(x);
-}
-
-template <typename T, vtkm::IdComponent N>
-VTKM_EXEC_CONT_EXPORT vtkm::Vec<T,N> Sqrt(const vtkm::Vec<T,N> &x) {
- vtkm::Vec<T,N> temp;
- for(vtkm::IdComponent i =0; i < N; ++i)
- {
-   temp[i]=sqrt(x[i]);
- }
- return temp;
-}
-
-// ----------------------------------------------------------------------------
 template <typename T, vtkm::IdComponent N>
 VTKM_EXEC_CONT_EXPORT
-vtkm::FloatDefault Norm(const vtkm::Vec<T, N> &x ) {
+vtkm::FloatDefault Norm2(const vtkm::Vec<T, N> &x ) {
     vtkm::FloatDefault t = 0;
     for (vtkm::IdComponent i = 0; i<N; i++)
         t += x[i]* (vtkm::FloatDefault)x[i];
@@ -72,7 +57,7 @@ vtkm::FloatDefault Norm(const vtkm::Vec<T, N> &x ) {
 template <typename T, vtkm::IdComponent N>
 VTKM_EXEC_CONT_EXPORT
 void Normalize(vtkm::Vec<T, N> &x) {
-    return x * ((vtkm::FloatDefault)1. /Norm(x));
+    return x * ((vtkm::FloatDefault)1. /Norm2(x));
 }
 
 // ----------------------------------------------------------------------------
@@ -107,4 +92,4 @@ vtkm::Vec<T, 3> TriangleNormal(const vtkm::Vec<T, 3> &a,
 }
 } // namespace vtkm::math
 
-#endif //_vtkm_math_VectorAnalysis_h
+#endif //__vtkm_math_VectorAnalysis_h
