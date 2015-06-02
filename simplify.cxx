@@ -131,6 +131,20 @@ public:
     }
 
     VTKM_EXEC_EXPORT
+    void rotate(vtkm::Id &i1, vtkm::Id &i2, vtkm::Id &i3) const
+    {
+        int temp=i1; i1 = i2; i2 = i3; i3 = temp;
+    }
+
+    //
+    VTKM_EXEC_EXPORT
+    void sort_ids(vtkm::Id &i1, vtkm::Id &i2, vtkm::Id &i3) const
+    {
+        while (i1>i2 || i1>i3)
+            rotate(i1, i2, i3);
+    }
+
+    VTKM_EXEC_EXPORT
     void operator()(const vtkm::Id &counter,
                     vtkm::Vec<vtkm::Id,3> &cidAry, vtkm::Vec<Vector9,3> &quadricAry) const
     {
@@ -154,6 +168,8 @@ public:
             quadricAry[i] = quadric9;
         }
 
+        // prepare for pass 3
+        //sort_ids(cidAry[0], cidAry[1], cidAry[2]);
     }
 };
 
@@ -197,6 +213,7 @@ public:
         float dist = vtkm::math::Norm2(p-center);
         if ( dist > grid.grid_width*1.732 )
         {
+            cout << "Pulling back" << endl;
             p = center + (p - center) * (grid.grid_width*1.732/dist);
         }
 
@@ -208,9 +225,10 @@ public:
     {
         get_grid_center( cid, result_pos );
 
-        cout << "cid=" << cid << ": " ;
-        print (quadric);
-        cout << endl;
+        // debug
+        //cout << "cid=" << cid << ": " ;
+        //print (quadric);
+        //cout << endl;
 
         /*
         for (int i=0; i<3; i++)
@@ -232,18 +250,27 @@ public:
             A(2,2)          = quadric[7];
             b[2]            =-quadric[8];
         }
+
+
         Diagonalize( (vtkm::Float32 (*)[3])&A[0], (vtkm::Float32 (*)[3])&Q[0], (vtkm::Float32 (*)[3])&D[0] );
+
+        // debug
+        //cout << "Diagonalize:" << endl;
+        //print ( *(Vector9 *) &A[0]); cout << endl;
+        //print ( *(Vector9 *) &Q[0]); cout << endl;
+        //print ( *(Vector9 *) &D[0]); cout << endl;
 
         vtkm::Float32 dmax = max(D(0,0), max(D(1,1), D(2,2)));
         if (dmax == 0 || dmax != dmax) { // check 0 or nan
+            cout << "Cannot diagonalize.  Use center point." << endl;
             // do nothing
         } else
         {
             Matrix3x3 invD(0);
             #define SVTHRESHOLD (1e-3)
-            invD(0,0) = D(0,0) > SVTHRESHOLD*dmax ? 1./D(0,0) : 0;
-            invD(1,1) = D(1,1) > SVTHRESHOLD*dmax ? 1./D(1,1) : 0;
-            invD(2,2) = D(2,2) > SVTHRESHOLD*dmax ? 1./D(2,2) : 0;
+            invD(0,0) = D(0,0) > SVTHRESHOLD*grid.grid_width*dmax ? 1./D(0,0) : 0;
+            invD(1,1) = D(1,1) > SVTHRESHOLD*grid.grid_width*dmax ? 1./D(1,1) : 0;
+            invD(2,2) = D(2,2) > SVTHRESHOLD*grid.grid_width*dmax ? 1./D(2,2) : 0;
 
             D = vtkm::math::MatrixMultiply( vtkm::math::MatrixMultiply( Q, invD ),
                                             vtkm::math::MatrixTranspose( Q ) );
@@ -263,6 +290,32 @@ public:
 
     }
 };
+
+template<typename T, int N>
+vtkm::cont::ArrayHandle<T> copyFromVec( vtkm::cont::ArrayHandle< vtkm::Vec<T, N> > const& other)
+{
+#if 0
+    std::size_t index = 0;
+    std::vector<T> vmem;
+    vmem.resize(other.GetNumberOfValues()*N);
+    for (int l=0; l<other.GetNumberOfValues(); l++)
+    {
+        vtkm::Vec<T, N> value = other.GetPortalConstControl().Get(l);
+        for(int j=0; j<N; ++j)
+        {
+            vmem[index]=value[j];
+            ++index;
+        }
+    }
+    vtkm::cont::ArrayHandle<T> mem = vtkm::cont::make_ArrayHandle(vmem);
+#else
+    const T *vmem = reinterpret_cast< const T *>(& *other.GetPortalConstControl().GetRawIterator());
+    vtkm::cont::ArrayHandle<T> mem = vtkm::cont::make_ArrayHandle(vmem, other.GetNumberOfValues()*N);
+#endif
+    vtkm::cont::ArrayHandle<T> result;
+    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::Copy(mem,result);
+    return result;
+}
 
 ///////////////////////////////////////////////////
 /// \brief simplify: Mesh simplification extending Lindstrom 2000
@@ -316,7 +369,7 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
     // invoke
     dispatcher.Invoke(counterArray, cidArray, quadricArray);
 
-#if 1
+#if 0
     for (int l=0; l<cidArray.GetNumberOfValues(); l++)
     {
         cout << cidArray.GetPortalConstControl().Get(l)[0]  << ",";
@@ -327,39 +380,48 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
 #endif
 
     /// pass 1 reduce
-    vtkm::cont::ArrayHandle<vtkm::Id> cidArrayToReduce = vtkm::cont::make_ArrayHandle(
-                reinterpret_cast< const vtkm::Id *>(&*cidArray.GetPortalConstControl().GetRawIterator()), cidArray.GetNumberOfValues()*3 );
-    vtkm::cont::ArrayHandle<Vector9 > quadricArrayToReduce = vtkm::cont::make_ArrayHandle(
-                reinterpret_cast< const Vector9 *>(&*quadricArray.GetPortalConstControl().GetRawIterator()), cidArray.GetNumberOfValues()*3 );
-    vtkm::cont::ArrayHandle<vtkm::Id> cidArrayReduced ; // don't need to initialize?
-    vtkm::cont::ArrayHandle<Vector9> quadricArrayReduced; // don't need to initialize?
+    vtkm::cont::ArrayHandle<vtkm::Id> cidArrayToReduce = copyFromVec(cidArray);
+    vtkm::cont::ArrayHandle<Vector9> quadricArrayToReduce = copyFromVec(quadricArray);
+
+    vtkm::cont::ArrayHandle<vtkm::Id> cidArrayReduced;
+    vtkm::cont::ArrayHandle<Vector9> quadricArrayReduced;
 
     // !!! YOu have to sort first !!!
+#if 0
     {
         cout << cidArrayToReduce.GetNumberOfValues() << endl;
         for (int k=0; k<cidArrayToReduce.GetNumberOfValues(); k++)
             cout << cidArrayToReduce.GetPortalConstControl().Get(k) << " ";
         cout << endl;
     }
+#endif
 
     vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::SortByKey(cidArrayToReduce, quadricArrayToReduce);
 
+#if 0
     {
         cout << cidArrayToReduce.GetNumberOfValues() << endl;
         for (int k=0; k<cidArrayToReduce.GetNumberOfValues(); k++)
             cout << cidArrayToReduce.GetPortalConstControl().Get(k) << " ";
         cout << endl;
     }
+#endif
 
     vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::ReduceByKey(cidArrayToReduce,    quadricArrayToReduce,
                                                                    cidArrayReduced,     quadricArrayReduced,
                                                                    vtkm::internal::Add());
+#if 1
     {
         cout << cidArrayReduced.GetNumberOfValues() << endl;
         for (int k=0; k<cidArrayReduced.GetNumberOfValues(); k++)
             cout << cidArrayReduced.GetPortalConstControl().Get(k) << " ";
+        for (int k=0; k<quadricArrayReduced.GetNumberOfValues(); k++) {
+            print( quadricArrayReduced.GetPortalConstControl().Get(k) );
+            cout << endl;
+        }
         cout << endl;
     }
+#endif
 
     //cidArray.ReleaseResources();
     //quadricArray.ReleaseResources();
@@ -381,6 +443,8 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
 
     /// Pass 3 : Decimated mesh generation
     /// For each original triangle, only output vertices from three different clusters
+
+
     int i;
     vtkm::Id mapping[gridInfo.dim[0]*gridInfo.dim[1]*gridInfo.dim[2]];
     for (i=0; i<cidArrayReduced.GetNumberOfValues(); i++)
