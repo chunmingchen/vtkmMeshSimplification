@@ -343,6 +343,7 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
     }
 
     vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::SortByKey(cidArrayToReduce, quadricArrayToReduce);
+
     {
         cout << cidArrayToReduce.GetNumberOfValues() << endl;
         for (int k=0; k<cidArrayToReduce.GetNumberOfValues(); k++)
