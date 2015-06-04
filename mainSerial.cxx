@@ -32,6 +32,8 @@
 #include "vtkMatrix4x4.h"
 #include "vtkMatrix3x3.h"
 
+#include <vtkm/cont/Timer.h>
+
 #include "simplify.h"
 #include "cp_time.h"
 
@@ -86,10 +88,9 @@ void set_origin_and_dim()
 /// the vtk version
 void vtk_simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &output_data_)
 {
-    Timer timer;
-    timer.start();
 
     set_origin_and_dim();   // compute xdim, ydim, zdim
+    vtkm::cont::Timer<> timer;
 
     vsp_new(vtkQuadricClustering, filter);
     filter->SetInputData(data);
@@ -102,8 +103,7 @@ void vtk_simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData
     output_data = vtkSmartPointer<vtkPolyData>::New();
     output_data->DeepCopy(filter->GetOutput());
 
-    timer.end();
-    cout << "Time (ms): " << timer.getElapsedMS() << endl;
+    cout << "Time (s): " << timer.GetElapsedTime() << endl;
 
     cout << "Number of output points: " << output_data->GetNumberOfPoints() << endl;
     cout << "Number of output cells: " << output_data->GetNumberOfCells() << endl;

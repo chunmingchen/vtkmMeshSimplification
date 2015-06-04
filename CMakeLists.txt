@@ -12,7 +12,7 @@ option(USE_CUDA "Compile with cuda" OFF)
 find_package(VTKm REQUIRED)
 include(VTKmMacros)
 vtkm_configure_device(Serial)
-#vtkm_configure_device(Cuda)
+#vtkm_configure_device(TBB)
 
 
 #########################################################
@@ -28,7 +28,7 @@ include(${VTK_USE_FILE})
 find_package(Boost REQUIRED)
 include_directories(${Boost_INCLUDE_DIRS})
 
-#SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 ########################################################
 
 include_directories(.)
