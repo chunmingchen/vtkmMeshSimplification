@@ -89,7 +89,6 @@ vtkm::Vec<T, 3> TriangleNormal(const vtkm::Vec<T, 3> &a,
 }
 
 
-}
-} // namespace vtkm::math
+}} // namespace vtkm::math
 
 #endif //__vtkm_math_VectorAnalysis_h

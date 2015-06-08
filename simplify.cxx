@@ -8,6 +8,8 @@
 
 #include <vtkm/cont/ArrayHandle.h>
 #include <vtkm/cont/ArrayHandleCounting.h>
+#include <vtkm/cont/ArrayHandlePermutation.h>
+
 #include <vtkm/cont/DynamicArrayHandle.h>
 #include <vtkm/cont/Timer.h>
 #include <vtkm/Pair.h>
@@ -20,10 +22,17 @@
 #include "simplify.h"
 #include "math/VectorAnalysis.h"
 #include "math/Matrix.h"
+#include "algorithm.h"
+
+#if (VTKM_DEVICE_ADAPTER==VTKM_DEVICE_ADAPTER_SERIAL)
+#pragma message ("Using Serial")
+#elif (VTKM_DEVICE_ADAPTER==VTKM_DEVICE_ADAPTER_TBB)
+#pragma message ("Using TBB")
+#endif
+typedef VTKM_DEFAULT_DEVICE_ADAPTER_TAG DeviceAdapter;
 
 using namespace std;
 
-typedef VTKM_DEFAULT_DEVICE_ADAPTER_TAG DeviceAdapter;
 
 typedef vtkm::Vec<vtkm::Float32,3> Vector3;
 typedef vtkm::Vec<vtkm::Float32,4> Vector4;
@@ -68,6 +77,7 @@ vtkm::Id get_cluster_id( const double p_[3], GridInfo &grid )
     return x + grid.dim[0] * (y + grid.dim[1] * z);  // get a unique hash value
 }
 
+#if 0 // Quadric Clustering
 /// Lindstrom
 /// For each triangle, compute pairs <clusterId, QuadMetric>
 class ComputeQuadricsWorklet : public vtkm::worklet::WorkletMapField
@@ -293,6 +303,7 @@ public:
 
     }
 };
+#endif
 
 // input: points  output: cid of the points
 class MapPointsWorklet : public vtkm::worklet::WorkletMapField {
@@ -322,6 +333,13 @@ public:
     void operator()(const PointType &point, vtkm::Id &cid) const
     {
         cid = get_cluster_id(point);
+        if (cid < 0)
+        {
+            cout << "!!!" ;
+            cid = get_cluster_id(point);
+
+        }
+        VTKM_ASSERT_CONT(cid>=0);  // the id could become overloaded if too many cells
     }
 };
 
@@ -434,7 +452,6 @@ public:
     }
 };
 
-
 template<typename T, int N>
 vtkm::cont::ArrayHandle<T> copyFromVec( vtkm::cont::ArrayHandle< vtkm::Vec<T, N> > const& other)
 {
@@ -443,60 +460,6 @@ vtkm::cont::ArrayHandle<T> copyFromVec( vtkm::cont::ArrayHandle< vtkm::Vec<T, N>
     vtkm::cont::ArrayHandle<T> result;
     vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::Copy(mem,result);
     return result;
-}
-
-
-// TODO: custom Less()
-template <class KeyType, class ValueType>
-void AverageByKey( const vtkm::cont::ArrayHandle<KeyType> &keyArray,
-                   const vtkm::cont::ArrayHandle<ValueType> &valueArray,
-                   vtkm::cont::ArrayHandle<KeyType> &outputKeyArray,
-                   vtkm::cont::ArrayHandle<ValueType> &outputValueArray)
-{
-#if 0
-    vtkm::cont::ArrayHandleConstant<vtkm::Id> oneArray(1, valueArray.GetNumberOfValues());
-    vtkm::cont::ArrayHandle<vtkm::Id> cArray ;
-
-    typedef typename vtkm::cont::ArrayHandleCompositeVectorType<
-            vtkm::cont::ArrayHandle<vtkm::Id>, vtkm::cont::ArrayHandle<ValueType> >::type CompositeHandleType;
-    CompositeHandleType compHandle =
-                    vtkm::cont::make_ArrayHandleCompositeVector(cArray, 0, valueArray, 1);
-    CompositeHandleType outputCompHandle;
-
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::SortByKey( keyArray, compHandle );
-
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::ReduceByKey( keyArray, compHandle, outputKeyArray, outputZip  );
-
-#else
-    vtkm::cont::ArrayHandle<ValueType> valueArraySorted, sumArray;
-    vtkm::cont::ArrayHandle<KeyType> keyArraySorted;
-
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::Copy( keyArray, keyArraySorted );
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::Copy( valueArray, valueArraySorted );
-
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::SortByKey( keyArraySorted, valueArraySorted );
-
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::ReduceByKey( keyArraySorted, valueArraySorted, outputKeyArray, sumArray,
-                                                                    vtkm::internal::Add());
-
-    vtkm::cont::ArrayHandleConstant<vtkm::Id> constOneArray(1, valueArray.GetNumberOfValues());
-    vtkm::cont::ArrayHandle<vtkm::Id> countArray;
-
-    vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::ReduceByKey( keyArraySorted, constOneArray, outputKeyArray, countArray,
-                                                                    vtkm::internal::Add());
-
-    // Using local structure with templates : Only works after c++11
-    struct DivideWorklet: public vtkm::worklet::WorkletMapField{
-        typedef void ControlSignature(FieldIn<>, FieldIn<>, FieldOut<>);
-        typedef void ExecutionSignature(_1, _2, _3);
-        VTKM_EXEC_EXPORT void operator()(const ValueType &v, vtkm::Id &count, ValueType &vout) const
-        {  vout = v * (1./count);  }
-    };
-
-    vtkm::worklet::DispatcherMapField<DivideWorklet >().Invoke(sumArray, countArray, outputValueArray);
-#endif
-
-
 }
 
 
@@ -509,7 +472,20 @@ void AverageByKey( const vtkm::cont::ArrayHandle<KeyType> &keyArray,
 void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &output_data, float grid_width)
 {
     /// inputs:
-    PointType *rawPoints = reinterpret_cast<PointType *>( data->GetPoints()->GetVoidPointer(0) );
+    PointType *rawPoints ;
+    if (data->GetPoints()->GetDataType() == VTK_FLOAT) {
+        rawPoints = reinterpret_cast<PointType *>( data->GetPoints()->GetVoidPointer(0) );
+    } else {
+        // convert to float
+        rawPoints = new PointType[data->GetNumberOfPoints()];
+        for (int i=0; i<data->GetNumberOfPoints(); i++)
+        {
+            double * p = data->GetPoints()->GetPoint(i);
+            rawPoints[i][0] = p[0];
+            rawPoints[i][1] = p[1];
+            rawPoints[i][2] = p[2];
+        }
+    }
     Triangle *rawTriangles = reinterpret_cast<Triangle *>( data->GetPolys()->GetPointer() );
 
     vtkm::cont::ArrayHandle<PointType> pointArray = vtkm::cont::make_ArrayHandle( rawPoints, data->GetNumberOfPoints() );
@@ -546,14 +522,14 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
 
     vtkm::worklet::DispatcherMapField<MapPointsWorklet>(MapPointsWorklet(gridInfo))
                                                       .Invoke(pointArray, pointCidArray );
-
+    //cout << "Time (s): " << timer.GetElapsedTime() << endl;
     /// pass 2 : compute average point position
     ///
     vtkm::cont::ArrayHandle<vtkm::Id> pointCidArrayReduced;
     vtkm::cont::ArrayHandle<Vector3> repPointArray;  // representative point
 
     AverageByKey( pointCidArray, pointArray, pointCidArrayReduced, repPointArray );
-
+    //cout << "Time (s): " << timer.GetElapsedTime() << endl;
 
 
     /// Pass 3 : Decimated mesh generation
@@ -579,6 +555,7 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
 
 
     /// Pass 3 preparation: Get index of pointCidArrayReduced
+    //cout << "Time (s): " << timer.GetElapsedTime() << endl;
     vtkm::cont::ArrayHandleCounting<vtkm::Id> counterArray3(0, pointCidArrayReduced.GetNumberOfValues());
     IndexingWorklet worklet3 ( gridInfo.dim[0]*gridInfo.dim[1]*gridInfo.dim[2] );
 
@@ -599,6 +576,8 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
     /// Pass 3: Unique
     ///
     vtkm::cont::ArrayHandle<vtkm::Id3 > uniquePointId3Array;
+
+    //cout << "Time (s): " << timer.GetElapsedTime() << endl;
     vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::Copy(pointId3Array,uniquePointId3Array);
 
     vtkm::cont::DeviceAdapterAlgorithm<DeviceAdapter>::Sort(uniquePointId3Array, Id3Less());
@@ -610,9 +589,6 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
     /// ////////////////////////////////////////
 
     cout << "Time (s): " << timer.GetElapsedTime() << endl;
-
-    cout << "num points: " << (repPointArray.GetNumberOfValues()/3)  << endl;
-    cout << "num cells: " << (uniquePointId3Array.GetNumberOfValues()/3)  << endl;
 
     /// output
     ///
@@ -644,6 +620,10 @@ void simplify(vtkSmartPointer<vtkPolyData> data, vtkSmartPointer<vtkPolyData> &o
         output_data->SetPolys(out_cells);
     }
 
+    cout << "num points: " << output_data->GetNumberOfPoints()  << endl;
+    cout << "num cells: " << output_data->GetNumberOfCells()  << endl;
+
     //    saveAsPly(verticesArray, writeLoc);
 
 }
+
